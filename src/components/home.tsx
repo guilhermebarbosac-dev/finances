@@ -4,113 +4,136 @@ import FinancialOverview from "./dashboard/FinancialOverview";
 import QuickAddTransaction from "./dashboard/QuickAddTransaction";
 import SavingsGoalTracker from "./dashboard/SavingsGoalTracker";
 import TransactionList from "./dashboard/TransactionList";
+import {
+  useProfile,
+  useCouple,
+  useTransactions,
+  useSavings,
+} from "@/lib/hooks";
+import { addTransaction, updateSavingsGoal } from "@/lib/queries";
 
-interface HomeProps {
-  userData?: {
-    user1: {
-      name: string;
-      avatar: string;
-    };
-    user2: {
-      name: string;
-      avatar: string;
-    };
-  };
-  financialData?: {
-    incomeData: {
-      month: string;
-      partner1: number;
-      partner2: number;
-    }[];
-    expenseData: {
-      personalExpenses: number;
-      jointExpenses: number;
-      categories: Array<{
-        name: string;
-        amount: number;
-        type: "personal" | "joint";
-      }>;
-    };
-    savingsData: {
-      totalSavings: number;
-      partnerASavings: number;
-      partnerBSavings: number;
-      goal: number;
-    };
-  };
-}
+const Home = () => {
+  const { profile } = useProfile();
+  const { couple } = useCouple();
+  const { transactions } = useTransactions();
+  const { savings } = useSavings();
 
-const defaultUserData = {
-  user1: {
-    name: "Partner A",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=partner1",
-  },
-  user2: {
-    name: "Partner B",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=partner2",
-  },
-};
+  if (!profile || !couple) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Carregando...</p>
+      </div>
+    );
+  }
 
-const defaultFinancialData = {
-  incomeData: [
-    { month: "Jan", partner1: 4000, partner2: 3500 },
-    { month: "Feb", partner1: 4200, partner2: 3700 },
-    { month: "Mar", partner1: 3800, partner2: 3600 },
-    { month: "Apr", partner1: 4100, partner2: 3800 },
-    { month: "May", partner1: 4300, partner2: 3900 },
-    { month: "Jun", partner1: 4500, partner2: 4000 },
-  ],
-  expenseData: {
-    personalExpenses: 2500,
-    jointExpenses: 3500,
-    categories: [
-      { name: "Rent", amount: 2000, type: "joint" },
-      { name: "Utilities", amount: 500, type: "joint" },
-      { name: "Groceries", amount: 1000, type: "joint" },
-      { name: "Shopping", amount: 1500, type: "personal" },
-      { name: "Entertainment", amount: 1000, type: "personal" },
-    ],
-  },
-  savingsData: {
-    totalSavings: 15000,
-    partnerASavings: 8000,
-    partnerBSavings: 7000,
-    goal: 20000,
-  },
-};
+  const isPartner1 = profile.id === couple.partner1.id;
+  const partner1 = couple.partner1;
+  const partner2 = couple.partner2;
 
-const Home = ({
-  userData = defaultUserData,
-  financialData = defaultFinancialData,
-}: HomeProps) => {
+  // Calculate financial data
+  const currentDate = new Date();
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(currentDate.getMonth() - 6);
+
+  const monthlyData = transactions
+    .filter((t) => new Date(t.created_at) >= sixMonthsAgo)
+    .reduce(
+      (acc, t) => {
+        const date = new Date(t.created_at);
+        const monthKey = date.toLocaleString("pt-BR", { month: "short" });
+
+        if (!acc[monthKey]) {
+          acc[monthKey] = { month: monthKey, partner1: 0, partner2: 0 };
+        }
+
+        if (t.type === "personal") {
+          if (t.partner_id === partner1.id) {
+            acc[monthKey].partner1 += t.amount;
+          } else {
+            acc[monthKey].partner2 += t.amount;
+          }
+        } else {
+          // Split joint expenses
+          acc[monthKey].partner1 += t.amount / 2;
+          acc[monthKey].partner2 += t.amount / 2;
+        }
+
+        return acc;
+      },
+      {} as Record<
+        string,
+        { month: string; partner1: number; partner2: number }
+      >,
+    );
+
+  const incomeData = Object.values(monthlyData);
+
+  const totalSavings = savings.reduce((sum, s) => sum + s.amount, 0);
+  const partner1Savings = savings
+    .filter((s) => s.partner_id === partner1.id)
+    .reduce((sum, s) => sum + s.amount, 0);
+  const partner2Savings = savings
+    .filter((s) => s.partner_id === partner2.id)
+    .reduce((sum, s) => sum + s.amount, 0);
+
+  const personalExpenses = transactions
+    .filter((t) => t.type === "personal")
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const jointExpenses = transactions
+    .filter((t) => t.type === "joint")
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const expenseCategories = transactions.reduce(
+    (acc, t) => {
+      if (!acc[t.category]) {
+        acc[t.category] = { name: t.category, amount: 0, type: t.type };
+      }
+      acc[t.category].amount += t.amount;
+      return acc;
+    },
+    {} as Record<
+      string,
+      { name: string; amount: number; type: "personal" | "joint" }
+    >,
+  );
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <DashboardHeader
-        user1={userData.user1}
-        user2={userData.user2}
-        notifications={3}
-      />
+      <DashboardHeader user1={partner1} user2={partner2} notifications={3} />
       <main className="container mx-auto px-4 py-6 space-y-6">
         <FinancialOverview
-          incomeData={financialData.incomeData}
-          expenseData={financialData.expenseData}
-          savingsData={financialData.savingsData}
-        />
-        <SavingsGoalTracker
-          currentAmount={financialData.savingsData.totalSavings}
-          goalAmount={financialData.savingsData.goal}
-          partner1Contribution={financialData.savingsData.partnerASavings}
-          partner2Contribution={financialData.savingsData.partnerBSavings}
-          partner1Name={userData.user1.name}
-          partner2Name={userData.user2.name}
-          lastMonthGrowth={12.5}
-        />
-        <TransactionList />
-        <QuickAddTransaction
-          onSubmit={(transaction) => {
-            console.log("New transaction:", transaction);
+          incomeData={incomeData}
+          expenseData={{
+            personalExpenses,
+            jointExpenses,
+            categories: Object.values(expenseCategories),
+          }}
+          savingsData={{
+            totalSavings,
+            partnerASavings: partner1Savings,
+            partnerBSavings: partner2Savings,
+            goal: couple.savings_goal,
           }}
         />
+        <SavingsGoalTracker
+          currentAmount={totalSavings}
+          goalAmount={couple.savings_goal}
+          partner1Contribution={partner1Savings}
+          partner2Contribution={partner2Savings}
+          partner1Name={partner1.name}
+          partner2Name={partner2.name}
+          lastMonthGrowth={12.5}
+          onUpdateGoal={updateSavingsGoal}
+        />
+        <TransactionList
+          transactions={transactions.map((t) => ({
+            ...t,
+            partner:
+              t.partner_id === partner1.id ? partner1.name : partner2.name,
+          }))}
+        />
+        <QuickAddTransaction onSubmit={addTransaction} />
       </main>
     </div>
   );
